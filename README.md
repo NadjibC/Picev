@@ -7,5 +7,5 @@ A Simple KivyMD Photo Viewer
 - kivy
 - Xlib
 
-## Install All Using
+#### Install All Using
       pip install --upgrade kivymd kivy xlib
