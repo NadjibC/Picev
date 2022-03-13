@@ -10,5 +10,8 @@ A Simple KivyMD Photo Viewer
 #### Install All Using
       pip install --upgrade kivymd kivy xlib
 #### Clone It Then Run the beta Version
-      c
+      git clone https://github.com/NadjibC/Picev.git
       
+      cd Picev
+      
+      python main.py
