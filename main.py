@@ -1,4 +1,3 @@
-#!/bin/python
 """
 Simple Google's Material Design Photo Viewer
 """
@@ -7,6 +6,9 @@ import glob
 import optparse
 import os
 import sys
+
+import kivy
+kivy.require('1.10.1')
 
 from Xlib import display
 from kivy import Logger
@@ -50,8 +52,6 @@ class App(MDApp):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-        self.loading_screen = MDGridLayout(cols=3, size_hint=(1, 1))
-
         self.props = {
             'loading': None,
             'notify': True,
@@ -60,13 +60,16 @@ class App(MDApp):
             'transition': AnimationTransition.out_quad,
             'transition_str': 'out_quad',
             'bar_toggled': None,
-            'keep_bar_shown': None
+            'keep_bar_shown': None,
+            'cursor_leaved': None
         }
 
         self.image = None
 
         self.icon = os.path.split(os.path.realpath(sys.argv[0]))[0] + f'/logo-{__app__.lower()}.png'
         self.title = __app__
+
+        self.loading_screen = Screen(name='loading_screen')
 
         self.global_screen = Screen()
         self.screen_mgr = ScreenManager()
@@ -90,7 +93,9 @@ class App(MDApp):
         self.file_manager = MDFileManager(ext=['.png', '.jpeg', '.bpm', '.ico', '.gif', '.xcf'])
 
         Window.bind(on_keyboard=self.on_keyboard)
-        Window.bind(size=self.on_resize)
+        # Window.bind(size=self.on_resize)
+        Window.bind(on_cursor_leave=lambda dt: self.props.update({'cursor_leaved': True}))
+        Window.bind(on_cursor_enter=lambda dt: self.props.update({'cursor_leaved': False}))
 
         self.anim_duration = 0.2
 
@@ -105,9 +110,10 @@ class App(MDApp):
         if self.enable_carousel:
             self.enable_carousel = int(self.enable_carousel)
 
-        self.view_screen = Screen(name='view')
+        self.view_screen = Screen(name='view_screen')
 
         self.screen_mgr.add_widget(self.view_screen)
+        self.screen_mgr.add_widget(self.loading_screen)
 
         self.bar_popup = MDGridLayout(rows=1, cols=9)
         self.bar_popup.md_bg_color = self.theme_cls.primary_color
@@ -153,9 +159,9 @@ class App(MDApp):
         del clock
 
     def get_screen_size(self):
-        Display = display.Display()
-        width = Display.width_in_pixels
-        height = Display.height_in_pixels
+        Display = display.Display().screen()
+        width = Display['width_in_pixels']
+        height = Display['height_in_pixels']
 
         return (width, height)
 
@@ -220,6 +226,18 @@ class App(MDApp):
             self.global_screen.add_widget(caption)
 
             animation.start(caption)
+    
+    @staticmethod
+    def glob(root_dir, pathname):
+        pwd = os.getcwd()
+
+        os.chdir(root_dir)
+
+        ls = glob.glob(pathname)
+        
+        os.chdir(pwd)
+		
+        return ls
 
     def get_img_list(self, directory=None):
         """
@@ -237,7 +255,7 @@ class App(MDApp):
         self.image_list = []
 
         for supported_image in self.supported_images:
-            self.image_list += glob.glob(root_dir=directory, pathname=supported_image)
+            self.image_list += self.glob(root_dir=directory, pathname=supported_image)
 
         self.image_list.sort()
 
@@ -266,7 +284,7 @@ class App(MDApp):
             self.current_image = self.image_list.index(os.path.split(tile.source)[1])
             self.set_base_image(os.path.split(tile.source)[1])
 
-    def make_tile(self):
+    def _make_tile(self, dt=None):
         """
         Create Group of SmartTile Classes from self.image_list
         """
@@ -289,6 +307,9 @@ class App(MDApp):
 
             self.props['tiles'].append(tile)
             self.up_popup.add_widget(tile)
+            
+    def make_tile(self):
+        Clock.schedule_once(self._make_tile)
 
     def toggle_carousel(self, caller=None):
         """
@@ -371,7 +392,7 @@ class App(MDApp):
             path (_type_): _description_
         """
         
-        _path = os.path.split(path)
+        _path = os.path.split(os.path.realpath(path))
 
         if path in self.image_list:
             self.base_image = path
@@ -392,7 +413,7 @@ class App(MDApp):
                 path = path + '/'
 
             self.get_img_list(directory=path)
-
+	
             os.chdir(path)
 
             self.refresh_look()
@@ -424,13 +445,14 @@ class App(MDApp):
         Pause Window when it is continued
         """
 
+        print(':: paused ::')
+
         if not self.props['loading']:
             self.props['loading'] = True
 
             self.loading_screen.md_bg_color = self.theme_cls.primary_color
-            self.loading_screen.opacity = 1
 
-            self.global_screen.add_widget(self.loading_screen)
+            self.screen_mgr.current = 'loading_screen'
 
     def resume(self):
         """
@@ -440,21 +462,7 @@ class App(MDApp):
         if self.props['loading']:
             self.props['loading'] = False
 
-            self.global_screen.remove_widget(self.loading_screen)
-
-    def on_resize(self, window, size):
-        """
-        Do Action When Resize Window
-
-        Args:
-            window (Window): Window
-            size (tuple): Window Size
-        """
-
-        self.refresh_look()
-
-        del window
-        del size
+            self.screen_mgr.current = 'view_screen'
 
     def refresh(self, clock_time=None):
         """
@@ -466,26 +474,23 @@ class App(MDApp):
 
         del clock_time
 
-        if self.props['tile_toggled']:
-            self.props['tile_toggled'] = False
-            self.show_tile()
-            self.props['tile_toggled'] = True
 
-        if Window.mouse_pos[1] < self.bar_popup.size[1] and not self.props['bar_toggled']:
+        if Window.mouse_pos[1] < self.bar_popup.size[1]:
             self.show_bar()
-        elif Window.mouse_pos[1] > self.bar_popup.size[1] and self.props['bar_toggled']:
+        elif Window.mouse_pos[1] > self.bar_popup.size[1]:
             self.hide_bar()
 
         if self.image_list:
             if self.props['keep_bar_shown']:
                 self.props['keep_bar_shown'] = False
-
-            if Window.mouse_pos[1] > (Window.size[1] - self.up_popup.size[1]):
-                if not self.props['bar_toggled']:
+            
+            if not self.props['cursor_leaved']:
+                if Window.mouse_pos[1] > (Window.size[1] - self.up_popup.size[1]):
                     self.show_tile()
-            elif Window.mouse_pos[1] < (Window.size[1] - self.up_popup.size[1]):
-                if self.props['bar_toggled']:
+                elif Window.mouse_pos[1] < (Window.size[1] - self.up_popup.size[1]):
                     self.hide_tile()
+            elif self.props['cursor_leaved']:
+                self.hide_tile()
         else:
             self.props['keep_bar_shown'] = True
             if not self.props['bar_toggled']:
@@ -496,28 +501,32 @@ class App(MDApp):
         Show The Bottom Bar With Animation
         """
 
-        animation = Animation(
-            pos=(self.bar_popup.pos[0], 0),
-            duration=self.anim_duration,
-        )
-        animation.start(self.bar_popup)
 
-        self.props['bar_toggled'] = True
+        if not self.props['bar_toggled']:
+
+            animation = Animation(
+                pos=(self.bar_popup.pos[0], 0),
+                duration=self.anim_duration,
+            )
+            animation.start(self.bar_popup)
+
+            self.props['bar_toggled'] = True
 
     def hide_bar(self):
         """
         Hide The Bottom Bar With Animation
         """
 
-        if not self.props['keep_bar_shown']:
-            animation = Animation(
-                pos=(self.bar_popup.pos[0], -90),
-                duration=self.anim_duration,
-                transition=self.props['transition']
-            )
-            animation.start(self.bar_popup)
+        if self.props['bar_toggled']:
+            if not self.props['keep_bar_shown']:
+                animation = Animation(
+                    pos=(self.bar_popup.pos[0], -90),
+                    duration=self.anim_duration,
+                    transition=self.props['transition']
+                )
+                animation.start(self.bar_popup)
 
-            self.props['bar_toggled'] = False
+                self.props['bar_toggled'] = False
 
     def show_tile(self):
         """
@@ -668,7 +677,7 @@ class App(MDApp):
             path (str): Open Path
         """
         self.file_manager.close()
-        self.set_base_image(path)
+        Clock.schedule_once(lambda dt: self.set_base_image(path))
 
     def refresh_look(self):
         """
